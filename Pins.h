@@ -29,11 +29,11 @@
 
 #include "RX.h"
 
-#define RADIO1_CSN_PIN            14     // AKA A0
-#define RADIO2_CSN_PIN            10     // Second radio for diversity.  Some older hardware used this pin as CE
+#define RADIO1_CSN_PIN            10
+//#define RADIO2_CSN_PIN            10     // Second radio for diversity.  Some older hardware used this pin as CE
 
-#define RADIO1_CE_PIN             RADIO1_CSN_PIN  // Set CE pin to CSN puts radio in a mode where CE is not used (always pulled high)
-#define RADIO2_CE_PIN             RADIO2_CSN_PIN
+#define RADIO1_CE_PIN             9  // Set CE pin to CSN puts radio in a mode where CE is not used (always pulled high)
+//#define RADIO2_CE_PIN             9
 
 #define SPI_MOSI                  11
 #define SPI_MISO                  12
@@ -63,8 +63,8 @@
 #define BIND_BUTTON_PIN           A3
 #define LED_PIN                   A1
 
-#define TELEMETRY_ANALOG_INPUT_1  6   // Pin A6
-#define TELEMETRY_ANALOG_INPUT_2  7   // Pin A7
+#define TELEMETRY_ANALOG_INPUT_1  0 // A0
+#define TELEMETRY_ANALOG_INPUT_2  0
 
 #ifdef TEST_HARNESS
   // Pins for test harness LCD display

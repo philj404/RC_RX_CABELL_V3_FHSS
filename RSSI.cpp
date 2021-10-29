@@ -35,6 +35,7 @@ RSSI::RSSI ()
 //--------------------------------------------------------------------------------------------------------------------------
 void RSSI::hit() {
   hitCount++;
+  Serial.print(F("."));
   sequentialMissTrack = constrain(sequentialMissTrack - RSSI_MISS_ADJUSTMENT_RECOVERY,TELEMETRY_RSSI_MIN_VALUE,TELEMETRY_RSSI_MAX_VALUE);
   packetProcess();
 }
@@ -43,6 +44,7 @@ void RSSI::hit() {
 //--------------------------------------------------------------------------------------------------------------------------
 void RSSI::miss() {
   missCount++;
+  Serial.println(F("X"));
   sequentialMissTrack = constrain(sequentialMissTrack + RSSI_MISS_ADJUSTMENT,TELEMETRY_RSSI_MIN_VALUE,TELEMETRY_RSSI_MAX_VALUE);
   packetProcess();
 }
@@ -51,6 +53,7 @@ void RSSI::miss() {
 //--------------------------------------------------------------------------------------------------------------------------
 void RSSI::secondaryHit() {
   secondaryHitCount++;
+  Serial.println(F("secondaryHit"));
 }
 
 
@@ -84,6 +87,10 @@ void RSSI::resetCounters() {
 
 //--------------------------------------------------------------------------------------------------------------------------
 uint8_t RSSI::getRSSI() {
- return constrain(packetRate - sequentialMissTrack,TELEMETRY_RSSI_MIN_VALUE,TELEMETRY_RSSI_MAX_VALUE);
+ uint8_t rssi = 
+   constrain(packetRate - sequentialMissTrack,TELEMETRY_RSSI_MIN_VALUE,TELEMETRY_RSSI_MAX_VALUE);
+ // clear counts for next time; no double-counting
+ // not part of resetCounters() to give faster response
+ sequentialMissTrack = TELEMETRY_RSSI_MIN_VALUE;
+ return rssi;
 }
-

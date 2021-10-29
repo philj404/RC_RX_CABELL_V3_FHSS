@@ -38,10 +38,21 @@
 #include "RX.h"
 #include "Pins.h"
 
+
+////////////////////////////////////////////////////////////////////////////////
+// which sketch is running?
+int showID(int /*ignored1*/ = 0, char ** /*ignored2*/ = NULL)
+{
+    Serial.println(F("Running " __FILE__ "\nBuilt " __DATE__));
+    return 0;
+}
+
 //--------------------------------------------------------------------------------------------------------------------------
 void setup(void) {
-  Serial.begin(74880);
-  Serial.println(); Serial.println(F("Initializing"));
+  Serial.begin(115200);
+  Serial.println(); 
+  showID();
+  Serial.println(F("Initializing"));
   
   pinMode (BIND_BUTTON_PIN,INPUT_PULLUP);  // used for bind plug or button
 
@@ -68,8 +79,3 @@ void loop() {
     ADC_Processing();   // Process ADC to asynchronously read A6 and A7 for telemetry analog values.  Non-blocking read
   }
 }
-
-
-
-
-

@@ -38,7 +38,7 @@
 #include "SBUS.h"
 
 My_RF24 radio1(RADIO1_CE_PIN,RADIO1_CSN_PIN);  
-My_RF24 radio2(RADIO2_CE_PIN,RADIO2_CSN_PIN);  
+//My_RF24 radio2(RADIO2_CE_PIN,RADIO2_CSN_PIN);  
 
 My_RF24* primaryReciever = NULL;
 My_RF24* secondaryReciever = NULL;
@@ -143,17 +143,17 @@ void setupReciever() {
 
   //Need to set all CSN pins high before BEGIN so that only one device listens on SPI during the first initialization
   pinMode(RADIO1_CSN_PIN,OUTPUT);    
-  pinMode(RADIO2_CSN_PIN,OUTPUT);   
+  //pinMode(RADIO2_CSN_PIN,OUTPUT);   
   digitalWrite(RADIO1_CSN_PIN,HIGH);
-  digitalWrite(RADIO2_CSN_PIN,HIGH);
+  //digitalWrite(RADIO2_CSN_PIN,HIGH);
   
   pinMode(RADIO1_CE_PIN,OUTPUT);    
-  pinMode(RADIO2_CE_PIN,OUTPUT);   
+  //pinMode(RADIO2_CE_PIN,OUTPUT);   
   digitalWrite(RADIO1_CE_PIN,HIGH);
-  digitalWrite(RADIO2_CE_PIN,HIGH);
+  //digitalWrite(RADIO2_CE_PIN,HIGH);
   
   radio1.begin();
-  radio2.begin();
+  //radio2.begin();
   
   #ifdef TEST_HARNESS
     Serial.println(F("Compiled for transceiver testing. Output Disabled.  Use LCD."));
@@ -162,19 +162,19 @@ void setupReciever() {
   // Set primary and secondary receivers.
   // If only one is present, then both primary and secondary receiver pointers end up pointing to the same radio.
   // This way the receiver swap logic doesn't care if one or two receives are actually connected
-  if (radio2.isChipConnected()) {
-    Serial.println(F("Backup radio detected"));
-    secondaryReciever = &radio2;
-  } else {
+  //if (radio2.isChipConnected()) {
+  //  Serial.println(F("Backup radio detected"));
+  //  secondaryReciever = &radio2;
+  //} else {
     Serial.println(F("Backup radio not detected"));
     secondaryReciever = &radio1;
-    digitalWrite(RADIO2_CSN_PIN,HIGH);   // If the backup radio is not present, set this pin high because some older 1 radio configurations used this as CE on the primary radio
-  }  
+    //digitalWrite(RADIO2_CSN_PIN,HIGH);   // If the backup radio is not present, set this pin high because some older 1 radio configurations used this as CE on the primary radio
+  //}  
   if (radio1.isChipConnected()) {
     primaryReciever = &radio1;
     Serial.println(F("Primary radio detected"));
   } else {
-    primaryReciever = &radio2;
+  //  primaryReciever = &radio2;
     Serial.println(F("Primary radio not detected"));
   }
 
@@ -480,8 +480,27 @@ void checkFailsafeDisarmTimeout(unsigned long lastPacketTime,bool inititalGoodPa
 }
 
 //--------------------------------------------------------------------------------------------------------------------------
+void plotPWM(void) {
+    static const char chans[5] = "AETR";
+    static int count = 0;
+    if (--count > 0) {
+        return;
+    }
+    count = 10; // rep rate
+    
+    for(int i = 0; i < 4; i++) {
+        Serial.print(F(" "));
+        Serial.print(chans[i]);
+        Serial.print(F(":"));
+        Serial.print(channelValues[i]);      
+    }
+    Serial.println();
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
 void outputPWM() {
 
+  //plotPWM();
   channelServo[ROLL_CHANNEL].writeMicroseconds(channelValues[ROLL_CHANNEL]);
   channelServo[PITCH_CHANNEL].writeMicroseconds(channelValues[PITCH_CHANNEL]);
   channelServo[YAW_CHANNEL].writeMicroseconds(channelValues[YAW_CHANNEL]);
