@@ -37,6 +37,11 @@
 #include "My_nRF24L01.h"
 #include "SBUS.h"
 
+#include "Robot.h"
+#include "ChangeReporter.h"
+
+void plotChannels(void);
+
 My_RF24 radio1(RADIO1_CE_PIN,RADIO1_CSN_PIN);  
 //My_RF24 radio2(RADIO2_CE_PIN,RADIO2_CSN_PIN);  
 
@@ -71,7 +76,8 @@ uint8_t radioChannel[CABELL_RADIO_CHANNELS];
 volatile uint8_t currentOutputMode = 255;    // initialize to an unused mode
 volatile uint8_t nextOutputMode = 255;       // initialize to an unused mode
 
-volatile bool packetReady = false;
+volatile bool lastPacketReady = false;
+volatile unsigned long lastPacketReceivedTime = 0;
 
 bool telemetryEnabled = false;
 int16_t analogValue[2] = {0,0};
@@ -80,13 +86,20 @@ uint16_t initialTelemetrySkipPackets = 0;
 
 uint8_t currentChannel = CABELL_RADIO_MIN_CHANNEL_NUM;  // Initializes the channel sequence.
 
-MyServo channelServo[RX_NUM_CHANNELS];
-
 #ifdef TEST_HARNESS
   TestHarness testOut;
 #endif
 
 RSSI rssi;
+
+#ifdef IS_ROBOT
+//
+// The robot does NOT have servos on those pins -- remove servo support to detect problems
+// Motor speed controlled with analogWrite().
+//
+#else // not a robot
+
+MyServo channelServo[RX_NUM_CHANNELS];
 
 //--------------------------------------------------------------------------------------------------------------------------
 void attachServoPins() {
@@ -108,13 +121,15 @@ void detachServoPins() {
     pinMode (servoPin[x],INPUT_PULLUP);
   }
 }
+#endif
 
 //--------------------------------------------------------------------------------------------------------------------------
 void setupReciever() {  
 
+#if !defined(IS_ROBOT)
   pinMode (PPM_OUTPUT_PIN,INPUT_PULLUP);   // Set this pin mode on PPM pin to keep PPM from floating until the output mode is received.  A 10k pull-up resistor is better as the pin floats until this line runs
   detachServoPins();                       // Sets input pullup on all servo pins to they dont float.
-  
+#endif  
   uint8_t softRebindFlag;
 
   EEPROM.get(softRebindFlagEEPROMAddress,softRebindFlag);
@@ -188,7 +203,7 @@ void setupReciever() {
   
   primaryReciever->flush_rx();
   secondaryReciever->flush_rx();
-  packetReady = false;
+  lastPacketReady = false;
 
   outputFailSafeValues(false);   // initialize default values for output channels
   
@@ -212,11 +227,22 @@ void setupReciever() {
 }
 
 //--------------------------------------------------------------------------------------------------------------------------
-  ISR(PCINT1_vect) {
+ISR(PCINT1_vect) {
     if (IS_RADIO_IRQ_on)  {  // pulled low when packet is received
-      packetReady = true;
+      lastPacketReady = true;
+      lastPacketReceivedTime = micros(); // last time TX/RX worked together
     }
-  }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+// avoid race when getting RX packetReady
+bool getPacketReady(void) {
+    noInterrupts();
+    auto packetReady = lastPacketReady;
+    lastPacketReady = false;
+    interrupts();
+    return packetReady;
+}
 
 //--------------------------------------------------------------------------------------------------------------------------
 void outputChannels() {
@@ -231,7 +257,12 @@ void outputChannels() {
       }
       
       bool firstPacketOnMode = false;
-    
+
+#if defined(IS_ROBOT)
+      // Using dual motor PWM control for a tracked robot
+      robotControl(channelValues, CABELL_NUM_CHANNELS);
+#else
+      // original code
       if (currentOutputMode != nextOutputMode) {   // If new mode, turn off all modes
        firstPacketOnMode = true;
        detachServoPins();
@@ -263,6 +294,7 @@ void outputChannels() {
           }
         }
       }
+#endif
       currentOutputMode = nextOutputMode;
     }
 #endif
@@ -315,7 +347,7 @@ void setNextRadioChannel(bool missedPacket) {
     swapRecievers();
    }
 
-  packetReady = false;
+  //lastPacketReady = false;
   primaryReciever->write_register(NRF_CONFIG,radioConfigRegisterForRX_IRQ_On);  // Turn on RX interrupt
  
 }
@@ -325,7 +357,7 @@ bool getPacket() {
   static unsigned long lastPacketTime = 0;  
   static bool inititalGoodPacketRecieved = false;
   static unsigned long nextAutomaticChannelSwitch = micros() + RESYNC_WAIT_MICROS;
-  static unsigned long lastRadioPacketeRecievedTime = millis() - (long)RESYNC_TIME_OUT;;
+  static unsigned long lastRadioPacketeRecievedTime = micros() - (long)RESYNC_TIME_OUT;
   static bool hoppingLockedIn = false;
   static uint16_t sequentialHitCount = 0;
   static uint16_t sequentialMissCount = 0;
@@ -335,12 +367,24 @@ bool getPacket() {
   bool strongSignal = false;
   
   // Wait for the radio to get a packet, or the timeout for the current radio channel occurs
+  auto packetReady = getPacketReady();
+  {
+    static ChangeReporter reporter(3200, "getPacket delta", 200, false);
+    static auto lastStart = micros();
+    auto now = micros();
+    auto delta = now - lastStart;
+    reporter.log(delta);
+    lastStart = now;
+  }
+  
   if (!packetReady) {
-    if ((long)(micros() - nextAutomaticChannelSwitch) >= 0 ) {      // if timed out the packet was missed, go to the next channel
+    //if ((long)(micros() - nextAutomaticChannelSwitch) >= 0 ) {      // if timed out the packet was missed, go to the next channel
+    long countdownToSwitch = (long) micros() - (long) nextAutomaticChannelSwitch;
+    if (countdownToSwitch >= 0 ) {      // if timed out the packet was missed, go to the next channel
       if (secondaryReciever->available()) {
         // missed packet but secondary radio has it so swap radios and signal packet ready
         //packet will be picked up on next loop through
-        packetReady = true;
+        lastPacketReady = true;
         secondaryRecieverUsed = true;
         swapRecievers();
         rssi.secondaryHit();
@@ -378,20 +422,34 @@ bool getPacket() {
       }
     }
   } else {
+    // packet is ready
     if (secondaryRecieverUsed) {
       // If the secondary receiver is used, then the packet was actually received some time ago, so don't uses micros(). 
       // Do this to prevent the timing from drifting if there are multiple packets in a row only received by the secondary receiver.
       lastRadioPacketeRecievedTime = nextAutomaticChannelSwitch - INITIAL_PACKET_TIMEOUT_ADD; //Can't log the actual received time when primary missed packet, so assume it came in when expected
       secondaryRecieverUsed = false;
     } else {
-      lastRadioPacketeRecievedTime = micros();   //Use this time to calculate the next expected packet so when we miss packets we can change channels
+      // Use this time to calculate the next expected packet so when we miss packets we can change channels
+      lastRadioPacketeRecievedTime = micros();
+      //lastRadioPacketeRecievedTime = lastPacketReceivedTime; // logged in ISR()
     }
     if (!powerOnLock) {
       // save this now while the value is latched.  To save loop time only do this before initial lock as the initial lock process is the only thing that needs this
 	  strongSignal = primaryReciever->testRPD();  
 	}
     goodPacket_rx = readAndProcessPacket();
-    nextAutomaticChannelSwitch = lastRadioPacketeRecievedTime + packetInterval + INITIAL_PACKET_TIMEOUT_ADD;  // must ne set after readAndProcessPacket because packetInterval may get adjusted
+    long timeToWait = packetInterval + INITIAL_PACKET_TIMEOUT_ADD;
+    static ChangeReporter packetTimeCheck(timeToWait, "packet delay", 250);
+    packetTimeCheck.log(timeToWait);
+    //nextAutomaticChannelSwitch = lastRadioPacketeRecievedTime + packetInterval + INITIAL_PACKET_TIMEOUT_ADD;  // must ne set after readAndProcessPacket because packetInterval may get adjusted
+    nextAutomaticChannelSwitch = lastRadioPacketeRecievedTime + timeToWait;  // must be set after readAndProcessPacket because packetInterval may get adjusted
+
+//    static int rate = 0;
+//    if((++rate) %1000 == 0) {
+//	    Serial.print(F("packetInterval = "));
+//	    Serial.println(packetInterval);
+//    }
+    
 	if (!powerOnLock && !strongSignal) {
 	   // During the initial power on lock process only consider the packet good if the signal was strong (better than -64 DBm) 
        goodPacket_rx = false;
@@ -449,8 +507,8 @@ bool getPacket() {
     }
     if ((sequentialMissCount > 5) || (sequentialMissCount + sequentialHitCount > 100)) {  // if more tnan 5 misses in a row assume it is a bad lock, or if after 100 packets there is still no lock
       //if this happens then there is a bad lock and we should try to sync again.
-      lastRadioPacketeRecievedTime = millis() - (long)RESYNC_TIME_OUT;
-      nextAutomaticChannelSwitch = millis() + RESYNC_WAIT_MICROS;
+      lastRadioPacketeRecievedTime = micros() - (long)RESYNC_TIME_OUT;
+      nextAutomaticChannelSwitch = micros() + RESYNC_WAIT_MICROS;
       telemetryEnabled = false;
       setNextRadioChannel(true);   //Getting the next channel ensures radios are flushed and properly waiting for a packet
       if (currentOutputMode != CABELL_RECIEVER_OUTPUT_SBUS) {
@@ -480,7 +538,8 @@ void checkFailsafeDisarmTimeout(unsigned long lastPacketTime,bool inititalGoodPa
 }
 
 //--------------------------------------------------------------------------------------------------------------------------
-void plotPWM(void) {
+void plotChannels(void) {
+    //static const char chans[5] = "EART"; // from Cabell docs
     static const char chans[5] = "AETR";
     static int count = 0;
     if (--count > 0) {
@@ -497,6 +556,7 @@ void plotPWM(void) {
     Serial.println();
 }
 
+#ifndef IS_ROBOT
 //--------------------------------------------------------------------------------------------------------------------------
 void outputPWM() {
 
@@ -570,6 +630,7 @@ void outputSbus() {  // output as AETR
   sbusSetFailsafe(failSafeMode); 
   sbusSetFrameLost(packetMissed); 
 }
+#endif
 
 //--------------------------------------------------------------------------------------------------------------------------
 void outputFailSafeValues(bool callOutputChannels) {
@@ -595,7 +656,7 @@ void outputFailSafeValues(bool callOutputChannels) {
 }
 
 //--------------------------------------------------------------------------------------------------------------------------
-#ifndef TEST_HARNESS
+#if !defined(TEST_HARNESS) && !defined(IS_ROBOT)
   ISR(TIMER1_COMPA_vect){
     if (currentOutputMode == CABELL_RECIEVER_OUTPUT_PWM)
       MyServoInterruptOneProcessing();
@@ -741,6 +802,7 @@ bool readAndProcessPacket() {    //only call when a packet is available on the r
   if (telemetryEnabled) {  // putting this after setNextRadioChannel will lag by one telemetry packet, but by doing this the telemetry can be sent sooner, improving the timing
     setTelemetryPowerMode(RxPacket.option);
     packetInterval = DEFAULT_PACKET_INTERVAL + (constrain(((int16_t)channelsRecieved - (int16_t)6),(int16_t)0 ,(int16_t)10 ) * (int16_t)100);  // increase packet period by 100 us for each channel over 6
+    //nope: packetInterval = MAX_PACKET_INTERVAL;
   } else {
     packetInterval = DEFAULT_PACKET_INTERVAL;
   }

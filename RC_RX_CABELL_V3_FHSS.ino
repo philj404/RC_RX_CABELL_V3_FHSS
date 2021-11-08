@@ -37,7 +37,7 @@
    
 #include "RX.h"
 #include "Pins.h"
-
+#include "Robot.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // which sketch is running?
@@ -66,6 +66,10 @@ void setup(void) {
   ADC_Processing();
  
   setupReciever();
+
+#if IS_ROBOT
+  robotSetup();
+#endif
   
   Serial.println(F("Starting main loop ")); 
 }
@@ -77,5 +81,9 @@ void loop() {
       outputChannels();
     }
     ADC_Processing();   // Process ADC to asynchronously read A6 and A7 for telemetry analog values.  Non-blocking read
+
+#if IS_ROBOT
+    robotUpdate();
+#endif
   }
 }
